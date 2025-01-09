@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carte des formations forestières dans la région toulousaine</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css" />
+    <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        header {
+            text-align: center;
+            padding: 10px;
+            background-color: #f4f4f4;
+            border-bottom: 1px solid #ccc;
+        }
+        #container {
+            display: flex;
+            flex-direction: row;
+            height: calc(100vh - 100px);
+        }
+        #map {
+            flex: 2;
+            height: 100%;
+            position: relative;
+        }
+        #context {
+            flex: 1;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-left: 1px solid #ccc;
+            overflow-y: auto;
+        }
+        #legend {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f4f4f4;
+            border: 1px solid #ccc;
+        }
+        #legend ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        #legend ul li {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        #legend ul li div {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            border: 1px solid #000;
+        }
+        footer {
+            text-align: center;
+            padding: 10px;
+            background-color: #f4f4f4;
+            border-top: 1px solid #ccc;
+        }
+        #info {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f4f4f4;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Carte des formations forestières dans la région toulousaine</h1>
+    </header>
+    <div id="container">
+        <div id="map"></div>
+        <div id="context">
+            <h2>Contexte</h2>
+            <p>Cette carte a été produite dans le cadre du projet de télédétection réalisé pour l'UE "Télédétection avancée". Elle résulte d'une classification supervisée basée sur une série temporelle d'images Sentinel-2, en utilisant comme référence la BD Forêt® version 2.0 de l'IGN. L'objectif principal est d'évaluer si cette base de données peut servir de source fiable d'échantillons de référence pour la classification.</p>
+            <p>Les étapes clés du projet incluent :</p>
+            <ul>
+                <li>Le téléchargement des images Sentinel-2 depuis la plateforme Theia.</li>
+                <li>Le pré-traitement des données.</li>
+                <li>La réalisation d'une classification supervisée à l'échelle du pixel.</li>
+                <li>L'agrégation des informations obtenues à l'échelle des peuplements de la BD Forêt.</li>
+                <li>L'évaluation de la qualité des cartes produites à ces deux échelles.</li>
+            </ul>
+            <p>Ce projet a été réalisé avec Lucas Lima et Alban Dumont.</p>
+            <div id="legend">
+                <h3>Légende</h3>
+                <ul id="legend-list"></ul>
+            </div>
+            <div id="info">
+                <h3>Informations</h3>
+                <p id="info-content">Cliquez sur la carte pour obtenir des informations sur le type de forêt.</p>
+            </div>
+        </div>
+    </div>
+    <footer>
+        <p>UE Webmapping, Robin Heckendorn, M2 SIGMA 2024-2025</p>
+    </footer>
+    <script>
+        // Couche de base OSM
+        const osmLayer = new ol.layer.Tile({
+            source: new ol.source.OSM()
+        });
+
+        // Couche WMS GeoServer
+        const rasterLayer = new ol.layer.Tile({
+            source: new ol.source.TileWMS({
+                url: 'https://www.geotests.net/geoserver/heck/wms',
+                params: {
+                    'LAYERS': 'heck:carte_essences_tiled',
+                    'STYLES': 'style_classif',
+                    'TILED': true,
+                    'VERSION': '1.1.0',
+                    'FORMAT': 'image/png',
+                    'TRANSPARENT': true
+                },
+                serverType: 'geoserver'
+            })
+        });
+
+        // Initialisation de la carte
+        const map = new ol.Map({
+            target: 'map',
+            layers: [osmLayer, rasterLayer],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([1.4442, 43.6047]), // Coordonnées de Toulouse
+                zoom: 11 // Zoom initial
+            })
+        });
+
+        // Dictionnaire des correspondances entre valeur de pixel et label
+        const forestTypes = {
+            11: "Autres feuillus",
+            12: "Chêne",
+            13: "Robinier",
+            14: "Peupleraie",
+            21: "Autres conifères autres que pin",
+            22: "Autres pins",
+            23: "Douglas",
+            24: "Pin laricio ou pin noir",
+            25: "Pin maritime"
+        };
+
+        // Ajouter un événement de clic
+        map.on('singleclick', function (evt) {
+            const viewResolution = map.getView().getResolution();
+            const wmsSource = rasterLayer.getSource();
+            const url = wmsSource.getFeatureInfoUrl(
+                evt.coordinate,
+                viewResolution,
+                'EPSG:3857', 
+                { 'INFO_FORMAT': 'application/json' }
+            );
+
+            if (url) {
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        const features = data.features;
+                        if (features && features.length > 0) {
+                            const quantity = features[0].properties.GRAY_INDEX;
+                            const forestType = forestTypes[quantity] || "Inconnu";
+                            document.getElementById('info-content').textContent = `Type de forêt : ${forestType}`;
+                        } else {
+                            document.getElementById('info-content').textContent = "Aucune information disponible pour ce point.";
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Erreur lors de la requête GetFeatureInfo:', error);
+                        document.getElementById('info-content').textContent = "Erreur lors de la récupération des informations.";
+                    });
+            }
+        });
+
+        // Légende manuelle basée sur les informations du SLD
+        const legendEntries = [
+            { color: "#008000", label: "Autres feuillus" },
+            { color: "#228B22", label: "Chêne" },
+            { color: "#32CD32", label: "Robinier" },
+            { color: "#6B8E23", label: "Peupleraie" },
+            { color: "#556B2F", label: "Autres conifères autres que pin" },
+            { color: "#2E8B57", label: "Autres pins" },
+            { color: "#66CDAA", label: "Douglas" },
+            { color: "#8FBC8F", label: "Pin laricio ou pin noir" },
+            { color: "#98FB98", label: "Pin maritime" }
+        ];
+
+        const legendList = document.getElementById('legend-list');
+        legendEntries.forEach(entry => {
+            const listItem = document.createElement('li');
+            const colorBox = document.createElement('div');
+            colorBox.style.backgroundColor = entry.color;
+
+            const label = document.createElement('span');
+            label.textContent = entry.label;
+
+            listItem.appendChild(colorBox);
+            listItem.appendChild(label);
+            legendList.appendChild(listItem);
+        });
+    </script>
+</body>
+</html>
